@@ -3,6 +3,7 @@
 #Include Lib\OCR.ahk
 #Include Lib\TextTools.ahk
 #Include Lib\SpeechEngine.ahk
+#Include Lib\TextFollower.ahk
 InstallKeybdHook 1, 1
 #UseHook 1
 
@@ -22,6 +23,15 @@ global Speech := SpeechEngine({
     log: DebugLog, onSlow: SlowVoiceHint
 })
 BuildTrayMenu()
+
+; --- Continuous reading ---
+global Follower := TextFollower(Config.flushMs)
+global followEnabled := 0
+global readingNow := 0 ; a manual reading is in progress
+global readingId := 0 ; changes with every manual reading, so older OCR results can be discarded
+try Hotkey "$" Config.followKey, (*) => ToggleFollow()
+catch
+    Hotkey "$F2", (*) => ToggleFollow() ; the key in settings.ini is not valid
 
 ; --- Global Variables ---
 global sX := 0, sY := 0, sW := 0, sH := 0, hasSavedArea := 0
@@ -153,15 +163,81 @@ Loop {
 ; --- Helper Functions ---
 
 RunOCRAndSpeak(x, y, w, h) {
+    global readingId, readingNow
+    readingNow++
     try {
         Speech.Resume()
         result := OCR.FromRect(x, y, w, h,, {scale: 2, grayscale: 1})
-        sentences := SentenceList(CleanOcrText(GetOrderedText(result)))
-        if sentences.Length
-            Speech.Load(sentences)
+        lines := GetOrderedLines(result)
+        if lines.Length {
+            readingId++
+            sentences := Follower.Prime(lines, followEnabled)
+            if (sentences.Length || followEnabled)
+                Speech.Load(sentences)
+        }
     } catch as err {
         DebugLog("OCR: " err.Message)
     }
+    readingNow--
+}
+
+; Switches continuous reading of the saved area on and off
+ToggleFollow() {
+    global followEnabled := !followEnabled
+    SetTimer(FollowTick, followEnabled ? Config.pollMs : 0)
+    if (followEnabled && !hasSavedArea)
+        _ToolTip("Continuous reading: ON, now select an area")
+    else
+        _ToolTip("Continuous reading: " . (followEnabled ? "ON" : "OFF"))
+}
+
+; Looks at the saved area and speaks what was not read yet
+FollowTick() {
+    static busy := false, lastPixels := 0, lines := [], lastId := 0, lastNews := 0
+    if (busy || readingNow || !hasSavedArea || GetKeyState("RCtrl", "P"))
+        return
+    busy := true
+    id := readingId
+    try {
+        pixels := AreaChecksum(sX, sY, sW, sH)
+        if (pixels != lastPixels || id != lastId) {
+            OCR.PerformanceMode := 0 ; do not keep a CPU core busy while waiting
+            result := OCR.FromRect(sX, sY, sW, sH,, {scale: 2, grayscale: 1})
+            lines := GetOrderedLines(result)
+            lastPixels := pixels, lastId := id
+        }
+        ; a manual reading may have started meanwhile
+        if (id = readingId && !readingNow && followEnabled) {
+            sentences := Follower.Feed(lines, sH, Speech.IsIdle)
+            if sentences.Length {
+                Speech.Append(sentences)
+                lastNews := A_TickCount
+            } else if (A_TickCount - lastNews < 180000)
+                Speech.Warm() ; the next line of a conversation should not have to wait for a connection
+        }
+    } catch as err {
+        DebugLog("follow: " err.Message " line " err.Line)
+    }
+    OCR.PerformanceMode := 1
+    busy := false
+}
+
+; Checksum of the pixels in an area, to skip OCR while nothing changes
+AreaChecksum(x, y, w, h) {
+    screen := DllCall("GetDC", "ptr", 0, "ptr")
+    dc := DllCall("CreateCompatibleDC", "ptr", screen, "ptr")
+    bi := Buffer(40, 0)
+    NumPut("uint", 40, "int", w, "int", -h, "ushort", 1, "ushort", 32, bi)
+    bmp := DllCall("CreateDIBSection", "ptr", dc, "ptr", bi, "uint", 0, "ptr*", &bits := 0, "ptr", 0, "uint", 0, "ptr")
+    old := DllCall("SelectObject", "ptr", dc, "ptr", bmp, "ptr")
+    DllCall("BitBlt", "ptr", dc, "int", 0, "int", 0, "int", w, "int", h, "ptr", screen, "int", x, "int", y, "uint", 0x00CC0020)
+    DllCall("GdiFlush")
+    crc := DllCall("ntdll\RtlComputeCrc32", "uint", 0, "ptr", bits, "int", w * h * 4, "uint")
+    DllCall("SelectObject", "ptr", dc, "ptr", old)
+    DllCall("DeleteObject", "ptr", bmp)
+    DllCall("DeleteDC", "ptr", dc)
+    DllCall("ReleaseDC", "ptr", 0, "ptr", screen)
+    return crc
 }
 
 Highlight(id, x?, y?, w?, h?, color:="Red", d:=2) {
@@ -190,7 +266,9 @@ Highlight(id, x?, y?, w?, h?, color:="Red", d:=2) {
 }
 
 _ToolTip(text) {
-    ToolTip(text)
+    hwnd := ToolTip(text)
+    ; keep it out of screen captures, so continuous reading does not read it
+    try DllCall("SetWindowDisplayAffinity", "ptr", hwnd, "uint", 0x11)
     SetTimer(() => ToolTip(), -1500)
 }
 
@@ -211,6 +289,14 @@ LoadSettings() {
             ; How many sentences to prepare in advance
             Prefetch=4
 
+            [ContinuousReading]
+            ; Key that switches continuous reading on and off
+            Hotkey=F2
+            ; How often to look at the area, in milliseconds
+            PollMs=250
+            ; How long an unfinished sentence waits for its continuation when there is nothing else to say
+            FlushMs=1500
+
             [General]
             ; 1 = write timings and errors to debug.log
             Debug=0
@@ -226,6 +312,9 @@ LoadSettings() {
         rate: num("Speech", "Rate", 0, -10, 10),
         gapMs: num("Speech", "SentenceGapMs", 220, 0, 3000),
         prefetch: num("Speech", "Prefetch", 4, 1, 8),
+        followKey: IniRead(SettingsFile, "ContinuousReading", "Hotkey", "F2"),
+        pollMs: num("ContinuousReading", "PollMs", 250, 100, 5000),
+        flushMs: num("ContinuousReading", "FlushMs", 1500, 200, 30000),
         debug: num("General", "Debug", 0, 0, 1)
     }
 }

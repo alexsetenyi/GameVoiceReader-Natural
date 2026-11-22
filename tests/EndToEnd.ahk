@@ -1,5 +1,7 @@
 #Requires AutoHotkey v2
 #SingleInstance Off
+#Warn All, StdOut
+#Warn LocalSameAsGlobal, Off
 #Include ..\Lib\OCR.ahk
 #Include ..\Lib\TextTools.ahk
 #Include ..\Lib\SpeechEngine.ahk

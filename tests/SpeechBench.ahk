@@ -1,5 +1,7 @@
 #Requires AutoHotkey v2
 #SingleInstance Off
+#Warn All, StdOut
+#Warn LocalSameAsGlobal, Off
 #Include ..\Lib\SpeechEngine.ahk
 ; Measures delays with real voices. Plays silence through the default audio device.
 ; Every sentence is new, because the online service answers repeated text faster.

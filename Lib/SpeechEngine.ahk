@@ -143,8 +143,10 @@ class SpeechEngine {
     Warm() {
         if A_TickCount - this.lastRequest < 20000
             return
-        this._Request(this._Clip("Ready."))
+        crit := Critical("On")
+        this._Request(this._NewClip("Ready."))   ; never cached, or there would be no request
         this._Wake()
+        Critical(crit)
     }
 
     SetVoice(name) {
@@ -249,13 +251,31 @@ class SpeechEngine {
         key := this.activeName "|" this.rate "|" text
         if this.clips.Has(key)
             return this.clips[key]
-        clip := {text: text, key: key, pcm: Buffer(96000), len: 0, done: false, tries: 0, busy: false, start: -1, stop: -1, notBefore: 0, used: false}
+        clip := this._NewClip(text, key)
         this.clips[key] := clip
         this.clipOrder.Push(key)
-        if this.clipOrder.Length > SpeechEngine.CacheClips
-            this.clips.Delete(this.clipOrder.RemoveAt(1))
+        if this.clipOrder.Length > SpeechEngine.CacheClips {
+            oldest := this.clipOrder.RemoveAt(1)
+            if this._Wanted(oldest)
+                this.clipOrder.Push(oldest)
+            else
+                this.clips.Delete(oldest)
+        }
         return clip
     }
+
+    ; Is this the sentence being played or one of the next?
+    _Wanted(key) {
+        i := Max(1, this.feed)
+        while i <= Min(this.feed + this.prefetch, this.items.Length) {
+            if this.activeName "|" this.rate "|" this.items[i] == key
+                return true
+            i++
+        }
+        return false
+    }
+
+    _NewClip(text, key := "") => {text: text, key: key, pcm: Buffer(96000), len: 0, done: false, tries: 0, busy: false, start: -1, stop: -1, notBefore: 0, used: false}
 
     _Request(clip) {
         if clip.done || clip.busy || A_TickCount < clip.notBefore
@@ -327,6 +347,8 @@ class SpeechEngine {
     _Measure(w, clip) {
         ms := w.tFirst - w.t0
         this._Log("rendered " Round(clip.len / SpeechEngine.BytesPerMs) "ms of audio, first after " ms "ms, all after " (A_TickCount - w.t0) "ms: " SubStr(clip.text, 1, 50))
+        if clip.key = ""       ; only warming up
+            return
         this.latencies.Push(ms)
         if this.slowReported || this.latencies.Length < 4
             return
@@ -353,19 +375,16 @@ class SpeechEngine {
             clip := this._Clip(this.items[i])
             if !this._Request(clip) {
                 ; Every worker is taken. Only the sentence needed right now may displace old work.
-                if i > this.feed || !this._Displace(last)
+                if i > this.feed || !this._Displace()
                     break
             }
             i++
         }
     }
 
-    _Displace(last) {
-        wanted := Map()
-        loop last - this.feed + 1
-            wanted[this._Clip(this.items[this.feed + A_Index - 1]).key] := 1
+    _Displace() {
         for w in this.workers
-            if w.clip && !wanted.Has(w.clip.key) {
+            if w.clip && !this._Wanted(w.clip.key) {
                 clip := w.clip
                 w.Abort()
                 clip.busy := false

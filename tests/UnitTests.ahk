@@ -1,5 +1,7 @@
 #Requires AutoHotkey v2
 #SingleInstance Off
+#Warn All, StdOut
+#Warn LocalSameAsGlobal, Off
 #Include ..\Lib\TextTools.ahk
 ; Text splitting and reading order. No voice, no screen.
 OnError((e, m) => (Out("ERR " e.Message " / " e.What " line " e.Line " " e.Extra), ExitApp(1)))
