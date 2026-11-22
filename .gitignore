@@ -1,0 +1,6 @@
+# per-user state, created at runtime
+settings.ini
+debug.log
+page.txt
+# Claude Code
+.claude/
