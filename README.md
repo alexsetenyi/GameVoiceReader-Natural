@@ -11,6 +11,8 @@ KnightDevRedEmber. Differences to the original:
 - no delays between sentences, even with online voices
 - rewind and fast forward by sentence
 - continuous reading: follows text while it scrolls, is typed out, or moves to the next page
+- fewer misread letters: smooth enlarging, two reading passes compared word by word, and repair
+  of typical OCR confusions with the Windows spell checker
 
 ## Requirements
 
@@ -30,7 +32,6 @@ the script has to as well.
 | Right Ctrl + move mouse, then left click | Select an area and read it |
 | F2 | Continuous reading on / off (key can be changed in `settings.ini`) |
 | F3 / F4 | Previous / next sentence |
-| F5 | Show the text that was read |
 | F6 | Show the saved area |
 | F7 | Read when the mouse enters the saved area, on / off |
 | F8 | Read the saved area again |
@@ -75,6 +76,31 @@ Text read with an online voice is sent to Microsoft.
 - F8 or a new selection starts over.
 - Select only the text, not portraits or moving parts around it.
 
+## Reading accuracy
+
+Windows OCR confuses similar letters more often the smaller the text is. Measured with `tests/OcrBench.ahk`
+on light text over a dark, textured background, six fonts, wrong words out of 1,530 per row (punctuation not counted):
+
+| Text height | Previous version | Now |
+|---|---|---|
+| about 12 px | 261 | 240 |
+| about 13 px | 146 | 105 |
+| about 16 px | 63 | 9 |
+| about 20 px | 42 | 4 |
+
+How large the selection is, and frames or icons inside it, made no difference. A larger selection just holds
+more text that can be misread. Below about 14 px OCR stays unreliable; if the game lets you, make its text
+larger.
+
+Settings in the `[OCR]` section of `settings.ini`:
+
+- `Passes=2,1.5` - how much the area is enlarged for each reading pass. `Passes=2` is faster
+  (about 200 instead of 340 ms for a nearly full-screen area, 50 instead of 90 ms for a dialogue box),
+  `Passes=2,3,1.5` is a little more accurate.
+- `FixWords=1` - repair words with the spell checker. Only used when most of the text is English, so text
+  in other languages is left as OCR read it. Names that are not in the dictionary are kept unless a typical
+  confusion turns them into a dictionary word.
+
 ## How it works
 
 `Lib/SpeechEngine.ahk` - SAPI asks a voice for the next sentence only when the previous one has finished,
@@ -87,6 +113,13 @@ not used because the adapter does not implement it.
 `Lib/TextFollower.ahk` - Compares repeated OCR results with the text read so far, word by word and tolerating
 OCR mistakes, to find what is new. A line is accepted once two results in a row agree on it.
 
+`Lib/OcrReader.ahk` - The previous version enlarged the capture by repeating pixels, which made OCR read
+"on" as "an" and "for" as "far" in some fonts. The capture is now enlarged with bicubic interpolation and read
+twice at different sizes. The two readings are aligned word by word, and where they differ the dictionary word
+wins. Words that are still not in the dictionary are repaired when exchanging typical confusions (rn/m, cl/d,
+li/h, l/I/1, o/0, ...) gives a dictionary word, when two words were read as one ("ofthem"), or when one word
+was read as two ("hom e").
+
 `Lib/TextTools.ahk` - Reading order, clean-up and sentence splitting.
 
 ## Tests
@@ -95,13 +128,12 @@ OCR mistakes, to find what is new. A line is accepted once two results in a row 
 
 | Script | |
 |---|---|
-| `UnitTests.ahk` | Sentence splitting and reading order |
+| `UnitTests.ahk` | Sentence splitting, reading order, word repair |
+| `OcrBench.ahk [fonts] [sizes] [methods]` | Misread words for several fonts, sizes and selections. Takes a few minutes |
 | `FollowerTests.ahk` | Simulated scrolling, typing, dialogue and OCR mistakes |
 | `SpeechBench.ahk [voice] [sentences]` | Delays with real voices, silent |
 | `EndToEnd.ahk` | Window, OCR and speech, silent |
 | `MainScriptTest.ahk` | The main script following a scrolling window, silent. Takes about 100 s |
-
-`Game Voice Reader SAPI5_v3.ahk` is the previous version, kept for reference.
 
 ## License
 

@@ -3,7 +3,8 @@
 #Warn All, StdOut
 #Warn LocalSameAsGlobal, Off
 #Include ..\Lib\TextTools.ahk
-; Text splitting and reading order. No voice, no screen.
+#Include ..\Lib\OcrReader.ahk
+; Text splitting, reading order and word repair. No voice, no screen.
 OnError((e, m) => (Out("ERR " e.Message " / " e.What " line " e.Line " " e.Extra), ExitApp(1)))
 global failed := 0, passed := 0
 
@@ -43,6 +44,25 @@ class OCR {      ; stand-in for the library's sort
 Check("order", GetOrderedText({Words: [w("world", 60, 3), w("second", 10, 40), w("Hello", 10, 0), w("line", 60, 44)]}), "Hello world`nsecond line")
 Check("order, large font", GetOrderedText({Words: [w("the", 60, 0, 50), w("on", 10, 16, 34), w("top", 120, 14, 50), w("below", 10, 80, 50)]}), "on the top`nbelow")
 Check("no words", GetOrderedText({Words: []}), "")
+
+; --- repairing misread words (Windows spell checker)
+rd := OcrReader([2], true)
+if !rd.fix
+    Out("skipped word repair: no English spell checker")
+else {
+    for pair in [["the rnidwinter feast", "the midwinter feast"], ["came hom e with", "came home with"], ["by m idwinter,", "by midwinter,"],
+                 ["Ifyou read ofthem", "If you read of them"], ["the charm s we hung", "the charms we hung"], ["Tlie cart is c1ear.", "The cart is clear."],
+                 ["Elmira and Tomas saw Dragonwilds", "Elmira and Tomas saw Dragonwilds"], ["a live coal", "a live coal"],
+                 ["lantern, 12 gold.", "lantern, 12 gold."], ["Bring it to Ashenfell", "Bring it to Ashenfell"]]
+        Check("repair " pair[1], rd.FixLine(pair[1]), pair[2])
+    Check("not English: left alone", rd.MostlyKnown([{text: "Hozd el a lámpát a bányából mielőtt besötétedik"}]), false)
+    Check("English: repaired", rd.MostlyKnown([{text: "Bring the lantern oil to Elmira before nightfall"}]), true)
+}
+; --- comparing passes word by word
+Check("vote: real word wins a tie", rd.VoteWords(StrSplit("frost 0n their cloaks", " "), [StrSplit("frost on their cloaks", " ")], rd.spell.ok), "frost on their cloaks")
+Check("vote: majority", rd.VoteWords(StrSplit("the hunters carne home", " "), [StrSplit("the hunters came home", " "), StrSplit("the hunters came home", " ")], rd.spell.ok), "the hunters came home")
+Check("vote: word missing in the first pass", rd.VoteWords(StrSplit("before The miners", " "), [StrSplit("before nightfall. The miners", " "), StrSplit("before nightfall. The miners", " ")], rd.spell.ok), "before nightfall. The miners")
+Check("vote: one pass alone adds nothing", rd.VoteWords(StrSplit("willow charms we hung", " "), [StrSplit("willow charm s we hung", " ")], rd.spell.ok), "willow charms we hung")
 
 Out(passed " passed, " failed " failed")
 ExitApp(failed ? 1 : 0)

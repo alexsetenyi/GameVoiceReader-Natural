@@ -2,6 +2,7 @@
 #SingleInstance Force
 #Include Lib\OCR.ahk
 #Include Lib\TextTools.ahk
+#Include Lib\OcrReader.ahk
 #Include Lib\SpeechEngine.ahk
 #Include Lib\TextFollower.ahk
 InstallKeybdHook 1, 1
@@ -16,6 +17,7 @@ OCR.PerformanceMode := 1
 ; --- Settings (settings.ini next to the script, created on first start) ---
 global SettingsFile := A_ScriptDir "\settings.ini"
 global Config := LoadSettings()
+global Reader := OcrReader(Config.ocrPasses, Config.fixWords)
 
 ; --- Voice ---
 global Speech := SpeechEngine({
@@ -49,11 +51,6 @@ F4:: {
     _ToolTip("Fast forward")
     Speech.Skip(1)
     KeyWait "F4"
-}
-
-F5:: {
-    text := Speech.Text
-    _ToolTip(text = "" ? "Nothing read yet" : SubStr(text, -1500))
 }
 
 F6:: {
@@ -167,8 +164,7 @@ RunOCRAndSpeak(x, y, w, h) {
     readingNow++
     try {
         Speech.Resume()
-        result := OCR.FromRect(x, y, w, h,, {scale: 2, grayscale: 1})
-        lines := GetOrderedLines(result)
+        lines := Reader.Read(x, y, w, h)
         if lines.Length {
             readingId++
             sentences := Follower.Prime(lines, followEnabled)
@@ -202,8 +198,7 @@ FollowTick() {
         pixels := AreaChecksum(sX, sY, sW, sH)
         if (pixels != lastPixels || id != lastId) {
             OCR.PerformanceMode := 0 ; do not keep a CPU core busy while waiting
-            result := OCR.FromRect(sX, sY, sW, sH,, {scale: 2, grayscale: 1})
-            lines := GetOrderedLines(result)
+            lines := Reader.Read(sX, sY, sW, sH)
             lastPixels := pixels, lastId := id
         }
         ; a manual reading may have started meanwhile
@@ -297,6 +292,14 @@ LoadSettings() {
             ; How long an unfinished sentence waits for its continuation when there is nothing else to say
             FlushMs=1500
 
+            [OCR]
+            ; How much the area is enlarged before reading, one number per pass. With several passes
+            ; the words most passes agree on are used. More passes are more accurate but slower.
+            Passes=2,1.5
+            ; 1 = repair words that OCR typically misreads (rn/m, cl/d, l/I, joined or split words)
+            ; with the Windows spell checker. Only used when most of the text is English.
+            FixWords=1
+
             [General]
             ; 1 = write timings and errors to debug.log
             Debug=0
@@ -315,8 +318,19 @@ LoadSettings() {
         followKey: IniRead(SettingsFile, "ContinuousReading", "Hotkey", "F2"),
         pollMs: num("ContinuousReading", "PollMs", 250, 100, 5000),
         flushMs: num("ContinuousReading", "FlushMs", 1500, 200, 30000),
+        ocrPasses: ParsePasses(IniRead(SettingsFile, "OCR", "Passes", "2,1.5")),
+        fixWords: num("OCR", "FixWords", 1, 0, 1),
         debug: num("General", "Debug", 0, 0, 1)
     }
+}
+
+; "2,1.5" -> [2, 1.5]; at most 3 passes, each between 1 and 4
+ParsePasses(text) {
+    list := []
+    for s in StrSplit(text, ",", " `t")
+        if IsNumber(s) && list.Length < 3
+            list.Push(Max(1, Min(4, Number(s))))
+    return list.Length ? list : [2, 1.5]
 }
 
 BuildTrayMenu() {

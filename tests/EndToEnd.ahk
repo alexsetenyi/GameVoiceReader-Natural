@@ -4,6 +4,7 @@
 #Warn LocalSameAsGlobal, Off
 #Include ..\Lib\OCR.ahk
 #Include ..\Lib\TextTools.ahk
+#Include ..\Lib\OcrReader.ahk
 #Include ..\Lib\SpeechEngine.ahk
 ; Draws a dialog on screen, reads it back with OCR and speaks it muted.
 OnError((e, m) => (Out("ERR " e.Message " / " e.What " line " e.Line " " e.Extra), ExitApp(1)))
@@ -15,9 +16,9 @@ g.Add("Text", "x20 y15 w660 h160", "Welcome back, traveller. The bridge to the n
 g.Show("NA x60 y60 w700 h190")
 Sleep 400
 t := A_TickCount
-r := OCR.FromRect(60, 60, 700, 190,, {scale: 2, grayscale: 1})
+lines := OcrReader([2, 1.5], true).Read(60, 60, 700, 190)
 ocrMs := A_TickCount - t
-list := SentenceList(CleanOcrText(GetOrderedText(r)))
+list := SentenceList(CleanOcrText(JoinLines(lines)))
 g.Destroy()
 Out("ocr " ocrMs "ms")
 for s in list
