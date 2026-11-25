@@ -70,6 +70,80 @@ Check("cut off sentence is held", Spoken(), "The third winter was the worst of t
 Show(Window(journal, 4, 6), 3, false)
 Check("and completed after scrolling, as one sentence", Has("There were tracks in the snow behind the palisade, large ones, and they did not belong to any beast I know."), 1)
 
+; --- fast scroll: each position visible for one poll only, moving most of the box at a time
+for step in [2, 3, 4, 5] {
+    Begin()
+    top := 1
+    loop {
+        Show(Window(journal, top, 6), 1)
+        if top + 5 >= journal.Length
+            break
+        top := Min(top + step, journal.Length - 5)
+    }
+    Show(Window(journal, top, 6), 3)
+    Idle()
+    Check("fast scroll by " step, Spoken(), full)
+}
+; --- fast scroll up from the end does not read backwards, and loses nothing going down again
+Begin()
+for top in [10, 10, 10, 7, 4, 1, 4, 7, 10, 10, 10]
+    Show(Window(journal, top, 6), 1)
+Idle()
+Check("fast scroll up and down", Spoken(), Joined(Window(journal, 10, 6)))
+
+; --- pages of a book: a sentence goes on over the page break
+Begin()
+for top in [1, 6, 11]
+    Show(Window(journal, top, 5), 3, false)
+Idle()
+Check("book pages", Spoken(), full)
+Check("sentence over the page break", Has("There were tracks in the snow behind the palisade, large ones, and they did not belong to any beast I know."), 1)
+
+; --- an old page comes back after a lot of other text: not read again
+Begin()
+Show(Window(journal, 1, 5), 3)
+vocab := StrSplit("amber bridge candle dagger ember falcon garden harbor island jewel kettle ladder meadow needle orchard pepper quarry ribbon saddle timber velvet wagon yonder zenith", " ")
+loop 70 {
+    p := ""
+    loop 12
+        p .= vocab[Random(1, vocab.Length)] (A_Index = 12 ? "." : " ")
+    Show(Wrap(StrUpper(SubStr(p, 1, 1)) SubStr(p, 2), 40), 3)
+}
+Show(Window(journal, 1, 5), 3)
+Idle()
+Check("old page not read again", StrSplit(Spoken(), "The third winter").Length, 2)
+
+; --- a new page that shares a phrase with something read long ago is read in full
+Begin()
+Show(["The bell rang twice before dawn, and nobody", "came to the gate of the old mill."], 3)
+Show(["We waited."], 3)
+Show(["Later the bell rang twice before dawn, and", "this time the miller himself stood there."], 3)
+Idle()
+Check("page with an old phrase", Spoken(), "The bell rang twice before dawn, and nobody came to the gate of the old mill. We waited. Later the bell rang twice before dawn, and this time the miller himself stood there.")
+
+; --- a portrait next to the text, read as scraps that change all the time
+Begin()
+for p in pages {
+    loop 4 {
+        rows := []
+        for t in Wrap(p, 40)
+            rows.Push({text: t, x: 140, y: 10 + A_Index * 30, w: 260, h: 20})
+        loop Random(0, 2)                  ; one or two scraps of a few letters
+            rows.Push({text: SubStr(Noise(1)[1], 1, Random(2, 6)), x: 10 + Random(0, 30), y: 10 + Random(0, 3) * 30, w: 70, h: 20})
+        Show(rows, 1)
+    }
+}
+Idle()
+Check("portrait next to the text", Spoken(), Joined(pages))
+
+; --- a health bar and a counter in the corners of a big box
+Begin()
+for p in ["You should rest before the climb tonight.", "The path is steep and the rope is old."]
+    Show([{text: "HP 120/140", x: 10, y: 5, w: 80, h: 18}, {text: p, x: 100, y: 300, w: 400, h: 20},
+          {text: "x3 Arrows", x: 520, y: 5, w: 70, h: 18}], 4)
+Idle()
+Check("bars and counters left out", Spoken(), "You should rest before the climb tonight. The path is steep and the rope is old.")
+
 ; --- typewriter text, at several speeds
 for speed in [2, 5, 9, 17] {
     Begin()
@@ -245,9 +319,9 @@ Mangle(w) {
     }
     return out
 }
-Noise() {
+Noise(count := Random(0, 4)) {
     list := []
-    loop Random(0, 4) {
+    loop count {
         s := ""
         loop Random(2, 14)
             s .= SubStr("ilI|. -oacwvTrnm", Random(1, 16), 1)

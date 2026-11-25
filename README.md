@@ -111,7 +111,11 @@ again. Rendered sentences are kept, so going back is immediate. SAPI's own `Skip
 not used because the adapter does not implement it.
 
 `Lib/TextFollower.ahk` - Compares repeated OCR results with the text read so far, word by word and tolerating
-OCR mistakes, to find what is new. A line is accepted once two results in a row agree on it.
+OCR mistakes, to find what is new. A line is accepted once two results in a row agree on it, except while
+the text scrolls by two lines or more at a time: then lines that were visible in only one result are taken too.
+Only the column the text is in is read, so scraps that OCR finds in a portrait, a map or a health bar next to
+it are left out, unless they look like sentences. A page that shares nothing with the one before is read in
+full, and when it starts in the middle of a sentence it continues the one the last page left open.
 
 `Lib/OcrReader.ahk` - The previous version enlarged the capture by repeating pixels, which made OCR read
 "on" as "an" and "for" as "far" in some fonts. The capture is now enlarged with bicubic interpolation and read

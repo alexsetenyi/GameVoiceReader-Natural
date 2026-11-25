@@ -44,6 +44,8 @@ class OCR {      ; stand-in for the library's sort
 Check("order", GetOrderedText({Words: [w("world", 60, 3), w("second", 10, 40), w("Hello", 10, 0), w("line", 60, 44)]}), "Hello world`nsecond line")
 Check("order, large font", GetOrderedText({Words: [w("the", 60, 0, 50), w("on", 10, 16, 34), w("top", 120, 14, 50), w("below", 10, 80, 50)]}), "on the top`nbelow")
 Check("no words", GetOrderedText({Words: []}), "")
+Check("wide gap splits a row", GetOrderedText({Words: [w("Hello", 10, 0), w("world", 60, 2), w("x3", 300, 0)]}), "Hello world`nx3")
+Check("split row keeps its place", GetOrderedLines({Words: [w("Hello", 10, 0), w("x3", 300, 0)]})[2].x, 300)
 
 ; --- repairing misread words (Windows spell checker)
 rd := OcrReader([2], true)

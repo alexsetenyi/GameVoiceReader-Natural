@@ -7,15 +7,22 @@
  * Feed() gets the lines currently visible and returns the sentences that are new,
  * whether the text scrolled, grew letter by letter or was replaced by the next page.
  *
+ *  - Only the column the text is in counts. Pieces of lines beside it, read from a portrait,
+ *    a map or a health bar, are left out unless they look like sentences themselves.
  *  - A line counts once two snapshots in a row agree on it. That ignores half typed
  *    lines, frames in the middle of a scroll and the game world behind the text.
+ *    While the text scrolls by more than a line at a time, lines that passed by in a
+ *    single snapshot are taken too.
  *  - Words are compared with what was read before in groups of three, tolerating
  *    single OCR mistakes. Whatever is not known yet is new.
+ *  - A page that shares nothing with the one before is read in full, even when a phrase of
+ *    it was read long ago. If it starts in the middle of a sentence, it continues the
+ *    sentence that the last page left unfinished.
  *  - A sentence cut off by the edge of the box is held back until the rest appears,
  *    or until nothing changes and there is nothing else left to say.
  */
 class TextFollower {
-    static Known := 600          ; how many words to remember
+    static Known := 2000         ; how many words to remember, a few pages of a book
 
     __New(flushMs := 1500) {
         this.flushMs := flushMs
@@ -24,8 +31,9 @@ class TextFollower {
 
     Reset() {
         this.norms := [], this.raws := []     ; everything read so far, word by word
-        this.previous := Map()                ; lines of the last snapshot
-        this.previousList := []
+        this.previous := Map()                ; lines of the last snapshot, key -> position
+        this.previousList := []               ; [{key, text, y, h}]
+        this.column := 0                      ; where the text was: {x1, x2}
         this.lastKey := ""
         this.page := []                       ; words of the last accepted snapshot
         this.pending := ""                    ; unfinished sentence
@@ -36,6 +44,7 @@ class TextFollower {
     ; sentence waits for its continuation.
     Prime(lines, holdTail, now := A_TickCount) {
         this.Reset()
+        lines := this._Region(lines)
         this._Remember(lines)
         words := TextFollower.Words(lines)
         this.page := words
@@ -50,8 +59,8 @@ class TextFollower {
     ; lines: [{text, y, h}], height of the area, idle: nothing left to say
     Feed(lines, height, idle, now := A_TickCount) {
         out := []
-        lines := this._Filter(lines, height)
-        stable := this._Stable(lines)
+        lines := this._Region(this._Filter(lines, height))
+        stable := this._Stable(lines, height)
         this._Remember(lines)
         if stable.Length {
             words := TextFollower.Words(stable)
@@ -81,53 +90,127 @@ class TextFollower {
             ; a line cut through by the edge of the box reads as nonsense
             if lines.Length > 1 && l.h < median * 0.75 && (l.y <= 2 || l.y + l.h >= height - 2)
                 continue
-            letters := StrLen(RegExReplace(l.text, "[^\p{L}]"))
-            solid := StrLen(RegExReplace(l.text, "\s"))
+            ; scraps of a frame or portrait at the ends of a line (GUESS: which symbols are scraps)
+            text := RegExReplace(l.text, "^(?:[^\p{L}\p{N}\x22'“‘«(\[*\s]+\s+)+")
+            text := RegExReplace(text, "(?:\s+[|~\\/_=<>°^¦]+)+$")
+            letters := TextFollower.Letters(text)
+            solid := StrLen(RegExReplace(text, "\s"))
             if letters < 2 || letters / solid < 0.6
                 continue
             ; very short lines have to look like a word: "No!" but not "-iI"
-            if letters < 4 && !RegExMatch(l.text, "^\W*\p{L}{2,}[.!?…]")
+            if letters < 4 && !RegExMatch(text, "^\W*\p{L}{2,}[.!?…]")
                 continue
-            kept.Push({text: l.text, key: TextFollower.LineKey(l.text)})
+            k := l.Clone(), k.text := text, k.key := TextFollower.LineKey(text)
+            kept.Push(k)
         }
         return kept
     }
+
+    ; Keeps the column the text is in. Lines beside it, such as scraps read from a portrait,
+    ; a map or a health bar, are left out unless they read like sentences themselves.
+    ; Text that stays the same from one snapshot to the next weighs more than scraps that change.
+    ; GUESS: lines belong to one column when they overlap across by 30% of the narrower one.
+    _Region(lines) {
+        if lines.Length < 2 || !lines[1].HasOwnProp("w")
+            return lines
+        columns := []
+        for i, l in lines {
+            x1 := l.x, x2 := l.x + l.w, home := 0
+            for c in columns
+                if Min(x2, c.x2) - Max(x1, c.x1) > Min(x2 - x1, c.x2 - c.x1) * 0.3 {
+                    home := c
+                    break
+                }
+            if !home
+                columns.Push(home := {x1: x1, x2: x2, letters: 0, lines: Map()})
+            home.x1 := Min(home.x1, x1), home.x2 := Max(home.x2, x2)
+            key := l.HasOwnProp("key") ? l.key : TextFollower.LineKey(l.text)
+            home.letters += TextFollower.Letters(l.text) * (this.previous.Has(key) ? 3 : 1), home.lines[i] := 1
+        }
+        main := columns[1]
+        for c in columns
+            if c.letters > main.letters
+                main := c
+        ; stay with the column of before while it still holds a fair part of the text
+        if this.column && !this._InColumn(main)
+            for c in columns
+                if this._InColumn(c) && c.letters >= main.letters / 3 {
+                    main := c
+                    break
+                }
+        if main.letters >= 15
+            this.column := {x1: main.x1, x2: main.x2}
+        out := []
+        for i, l in lines
+            if main.lines.Has(i) || TextFollower.Prose(l.text)
+                out.Push(l)
+        return out
+    }
+
+    _InColumn(c) => Min(c.x2, this.column.x2) - Max(c.x1, this.column.x1) > Min(c.x2 - c.x1, this.column.x2 - this.column.x1) * 0.3
 
     _Remember(lines) {
         this.previous := Map(), this.previousList := []
         for l in lines {
             key := l.HasOwnProp("key") ? l.key : TextFollower.LineKey(l.text)
-            this.previous[key] := 1
-            this.previousList.Push(key)
+            if !this.previous.Has(key)
+                this.previous[key] := A_Index
+            item := {key: key, text: l.text}
+            if l.HasOwnProp("y")
+                item.y := l.y, item.h := l.h
+            this.previousList.Push(item)
         }
     }
 
-    ; The lines from the first to the last one that the previous snapshot agrees with
-    _Stable(lines) {
-        first := 0, last := 0
+    ; The lines from the first to the last one that the previous snapshot agrees with.
+    ; When the text moved by two lines or more, it scrolls: the new lines that came in are
+    ; taken as well, and so are the lines of the previous snapshot that went out of view.
+    _Stable(lines, height) {
+        prev := this.previousList
+        first := 0, last := 0, from := 0, to := 0, shifts := []
+        pitch := TextFollower.Pitch(lines)
         for i, l in lines {
-            ok := this.previous.Has(l.key)
-            if !ok
-                for key in this.previousList {
+            j := this.previous.Get(l.key, 0)
+            if !j
+                for p in prev {
                     ; the last line may still be growing, so it must not be longer than before
-                    if i = lines.Length && StrLen(l.key) > StrLen(key)
+                    if i = lines.Length && StrLen(l.key) > StrLen(p.key)
                         continue
                     ; a line that stayed in place may differ more than one that moved
-                    enough := (A_Index = i && lines.Length = this.previousList.Length) ? 0.55 : 0.72
-                    if Abs(StrLen(l.key) - StrLen(key)) <= 3 && TextFollower.Dice(l.key, key) >= enough {
-                        ok := true
+                    enough := (A_Index = i && lines.Length = prev.Length) ? 0.55 : 0.72
+                    if Abs(StrLen(l.key) - StrLen(p.key)) <= 3 && TextFollower.Dice(l.key, p.key) >= enough {
+                        j := A_Index
                         break
                     }
                 }
-            if ok {
-                first := first || i
-                last := i
+            if j {
+                first := first || i, from := from || j
+                last := i, to := j
+                ; how many lines it moved up
+                shifts.Push(pitch && l.HasOwnProp("y") && prev[j].HasOwnProp("y") ? (prev[j].y - l.y) / pitch : j - i)
             }
         }
         out := []
-        if first
-            loop last - first + 1
-                out.Push(lines[first + A_Index - 1])
+        if !first
+            return out
+        shift := TextFollower.Median(shifts)
+        ; GUESS: two lines at once is scrolling, text that is typed or added to a log moves by one
+        if shift >= 1.6 {
+            loop from - 1                          ; went out at the top
+                out.Push(prev[A_Index])
+            last := lines.Length
+            if last > first && TextFollower.AtEdge(lines[last], height, false)
+                last--
+        } else if shift <= -1.6 {
+            first := 1
+            if first < last && TextFollower.AtEdge(lines[first], height, true)
+                first++
+        }
+        loop last - first + 1
+            out.Push(lines[first + A_Index - 1])
+        if shift <= -1.6
+            loop prev.Length - to                  ; went out at the bottom
+                out.Push(prev[to + A_Index])
         return out
     }
 
@@ -153,8 +236,17 @@ class TextFollower {
         covered := 0
         for p in at
             covered += p > 0
+        ; A page that shares nothing with the one before is a new page, even if some of it
+        ; was read long ago. GUESS: less than half of it known.
+        if covered && covered < n * 0.5 && !this._FromPage(words) {
+            loop n
+                at[A_Index] := 0
+            covered := 0
+        }
         if !covered {
-            this._Flush(out)           ; next page
+            ; next page; when it starts in the middle of a sentence it goes on with the last one
+            if !RegExMatch(words[1].raw, "^[^\p{L}\p{N}]*\p{Ll}")
+                this._Flush(out)
             this._Append(words, out, now)
             return
         }
@@ -209,6 +301,17 @@ class TextFollower {
                 this._Flush(out)
             this._Append(part, out, now)
         }
+    }
+
+    ; Three words in a row that the last accepted snapshot also had
+    _FromPage(words) {
+        seen := Map(), m := this.page.Length
+        loop m - 2
+            seen[this.page[A_Index].norm " " this.page[A_Index + 1].norm " " this.page[A_Index + 2].norm] := 1
+        loop words.Length - 2
+            if seen.Has(words[A_Index].norm " " words[A_Index + 1].norm " " words[A_Index + 2].norm)
+                return true
+        return false
     }
 
     ; How many words from a on are a misread version of what followed there before
@@ -474,6 +577,47 @@ class TextFollower {
         word := RegExReplace(StrLower(word), "[^\p{L}\p{N}|]")
         word := StrReplace(StrReplace(StrReplace(word, "0", "o"), "rn", "m"), "vv", "w")
         return RegExReplace(word, "[1l|]", "i")
+    }
+
+    static Letters(text) => StrLen(RegExReplace(text, "[^\p{L}]"))
+
+    ; Reads like a sentence: at least three words, nearly all of them made of letters
+    static Prose(text) {
+        words := 0, real := 0
+        loop parse text, " " {
+            if A_LoopField = ""
+                continue
+            words++
+            real += RegExMatch(A_LoopField, "^\W*\p{L}{2,}\W*$") > 0
+        }
+        return real >= 3 && real >= words * 0.8
+    }
+
+    ; Distance from one line to the next
+    static Pitch(lines) {
+        if lines.Length < 2 || !lines[1].HasOwnProp("y")
+            return 0
+        steps := []
+        loop lines.Length - 1
+            if (d := lines[A_Index + 1].y - lines[A_Index].y) > 0
+                steps.Push(d)
+        return steps.Length ? TextFollower.Median(steps) : 0
+    }
+
+    static AtEdge(line, height, top) {
+        if !line.HasOwnProp("y")
+            return false
+        return top ? line.y <= 2 : line.y + line.h >= height - 2
+    }
+
+    static Median(list) {
+        if !list.Length
+            return 0
+        s := ""
+        for v in list
+            s .= (A_Index = 1 ? "" : ",") v
+        sorted := StrSplit(Sort(s, "N D,"), ",")
+        return Number(sorted[sorted.Length // 2 + 1])
     }
 
     static LineKey(text) => Trim(RegExReplace(TextFollower.Norm(text), "\s+"))

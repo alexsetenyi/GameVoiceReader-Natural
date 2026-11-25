@@ -71,6 +71,9 @@ class OcrReader {
                 best := "", bestOverlap := 0
                 for o in passes[A_Index + 1] {
                     overlap := Min(ln.y + ln.h, o.y + o.h) - Max(ln.y, o.y)
+                    ; a row can be split in two pieces side by side, so they must also overlap across
+                    if Min(ln.x + ln.w, o.x + o.w) <= Max(ln.x, o.x)
+                        continue
                     if overlap > bestOverlap && overlap > Min(ln.h, o.h) / 2
                         best := o, bestOverlap := overlap
                 }

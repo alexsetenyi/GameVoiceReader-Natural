@@ -28,18 +28,30 @@ GetOrderedLines(result, lineThreshold := 12) {
     if current.Length
         groups.Push(current)
 
+    ; A wide gap splits a row in two: a portrait or a second column next to the text
+    gap := heights[heights.Length // 2 + 1] * 2.5
     lines := []
     for group in groups {
         OCR.SortArray(group, (a, b) => a.x - b.x)
-        text := "", top := group[1].y, bottom := 0
+        part := [], right := 0
         for word in group {
-            text .= word.Text " "
-            top := Min(top, word.y), bottom := Max(bottom, word.y + word.h)
+            if part.Length && word.x - right > gap
+                lines.Push(_JoinWords(part)), part := []
+            part.Push(word)
+            right := part.Length = 1 ? word.x + word.w : Max(right, word.x + word.w)
         }
-        last := group[group.Length]
-        lines.Push({text: RTrim(text), x: group[1].x, y: top, w: last.x + last.w - group[1].x, h: bottom - top})
+        lines.Push(_JoinWords(part))
     }
     return lines
+}
+
+_JoinWords(words) {
+    text := "", top := words[1].y, bottom := 0, right := 0
+    for word in words {
+        text .= word.Text " "
+        top := Min(top, word.y), bottom := Max(bottom, word.y + word.h), right := Max(right, word.x + word.w)
+    }
+    return {text: RTrim(text), x: words[1].x, y: top, w: right - words[1].x, h: bottom - top}
 }
 
 GetOrderedText(result, lineThreshold := 12) => JoinLines(GetOrderedLines(result, lineThreshold))
