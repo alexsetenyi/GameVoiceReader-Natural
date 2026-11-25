@@ -2,7 +2,5 @@
 settings.ini
 debug.log
 page.txt
-# Claude Code
-.claude/
 # previous version, kept locally only
 Game Voice Reader SAPI5_v3.ahk
