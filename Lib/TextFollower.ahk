@@ -304,13 +304,18 @@ class TextFollower {
         }
     }
 
-    ; Three words in a row that the last accepted snapshot also had
+    ; Shares text with the last accepted snapshot: two pairs of words in a row, tolerating
+    ; misread words. Pairs of two short words ("of the") do not count.
     _FromPage(words) {
         seen := Map(), m := this.page.Length
-        loop m - 2
-            seen[this.page[A_Index].norm " " this.page[A_Index + 1].norm " " this.page[A_Index + 2].norm] := 1
-        loop words.Length - 2
-            if seen.Has(words[A_Index].norm " " words[A_Index + 1].norm " " words[A_Index + 2].norm)
+        loop m - 1 {
+            a := this.page[A_Index].norm, b := this.page[A_Index + 1].norm
+            if StrLen(a) >= 4 || StrLen(b) >= 4
+                seen[a " " b] := 1
+        }
+        hits := 0
+        loop words.Length - 1
+            if seen.Has(words[A_Index].norm " " words[A_Index + 1].norm) && ++hits >= 2
                 return true
         return false
     }
