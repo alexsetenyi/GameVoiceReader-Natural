@@ -125,12 +125,12 @@ Check("page with an old phrase", Spoken(), "The bell rang twice before dawn, and
 Begin()
 for p in pages {
     loop 4 {
-        rows := []
+        shown := []
         for t in Wrap(p, 40)
-            rows.Push({text: t, x: 140, y: 10 + A_Index * 30, w: 260, h: 20})
+            shown.Push({text: t, x: 140, y: 10 + A_Index * 30, w: 260, h: 20})
         loop Random(0, 2)                  ; one or two scraps of a few letters
-            rows.Push({text: SubStr(Noise(1)[1], 1, Random(2, 6)), x: 10 + Random(0, 30), y: 10 + Random(0, 3) * 30, w: 70, h: 20})
-        Show(rows, 1)
+            shown.Push({text: SubStr(Noise(1)[1], 1, Random(2, 6)), x: 10 + Random(0, 30), y: 10 + Random(0, 3) * 30, w: 70, h: 20})
+        Show(shown, 1)
     }
 }
 Idle()
