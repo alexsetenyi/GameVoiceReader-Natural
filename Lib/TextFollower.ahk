@@ -60,7 +60,7 @@ class TextFollower {
     Feed(lines, height, idle, now := A_TickCount) {
         out := []
         lines := this._Region(this._Filter(lines, height))
-        stable := this._Stable(lines, height)
+        stable := this._Stable(lines)
         this._Remember(lines)
         if stable.Length {
             words := TextFollower.Words(stable)
@@ -163,14 +163,16 @@ class TextFollower {
     }
 
     ; The lines from the first to the last one that the previous snapshot agrees with.
-    ; When the text moved by two lines or more, it scrolls: the new lines that came in are
-    ; taken as well, and so are the lines of the previous snapshot that went out of view.
-    _Stable(lines, height) {
+    ; When the text moved by two lines or more, it scrolls fast: the lines of the previous
+    ; snapshot that went out of view are taken too, since they will not be seen again.
+    _Stable(lines) {
         prev := this.previousList
-        first := 0, last := 0, from := 0, to := 0, shifts := []
+        first := 0, last := 0, from := 0, to := 0, shifts := [], sure := 0
         pitch := TextFollower.Pitch(lines)
         for i, l in lines {
             j := this.previous.Get(l.key, 0)
+            if j && StrLen(l.key) >= 20
+                sure++
             if !j
                 for p in prev {
                     ; the last line may still be growing, so it must not be longer than before
@@ -193,19 +195,18 @@ class TextFollower {
         out := []
         if !first
             return out
+        ; GUESS: two lines at once is scrolling, text that is typed or added to a log moves by one.
+        ; Two lines have to agree on it, or one long line read exactly the same, so a chance match
+        ; in the game world does not count.
         shift := TextFollower.Median(shifts)
-        ; GUESS: two lines at once is scrolling, text that is typed or added to a log moves by one
-        if shift >= 1.6 {
+        if shifts.Length < 2 && !sure
+            shift := 0
+        for d in shifts
+            if Abs(d - shift) > 0.5
+                shift := 0
+        if shift >= 1.6
             loop from - 1                          ; went out at the top
                 out.Push(prev[A_Index])
-            last := lines.Length
-            if last > first && TextFollower.AtEdge(lines[last], height, false)
-                last--
-        } else if shift <= -1.6 {
-            first := 1
-            if first < last && TextFollower.AtEdge(lines[first], height, true)
-                first++
-        }
         loop last - first + 1
             out.Push(lines[first + A_Index - 1])
         if shift <= -1.6
@@ -602,12 +603,6 @@ class TextFollower {
             if (d := lines[A_Index + 1].y - lines[A_Index].y) > 0
                 steps.Push(d)
         return steps.Length ? TextFollower.Median(steps) : 0
-    }
-
-    static AtEdge(line, height, top) {
-        if !line.HasOwnProp("y")
-            return false
-        return top ? line.y <= 2 : line.y + line.h >= height - 2
     }
 
     static Median(list) {
