@@ -121,21 +121,6 @@ Show(["Later the bell rang twice before dawn, and", "this time the miller himsel
 Idle()
 Check("page with an old phrase", Spoken(), "The bell rang twice before dawn, and nobody came to the gate of the old mill. We waited. Later the bell rang twice before dawn, and this time the miller himself stood there.")
 
-; --- a portrait next to the text, read as scraps that change all the time
-Begin()
-for p in pages {
-    loop 4 {
-        shown := []
-        for t in Wrap(p, 40)
-            shown.Push({text: t, x: 140, y: 10 + A_Index * 30, w: 260, h: 20})
-        loop Random(0, 2)                  ; one or two scraps of a few letters
-            shown.Push({text: SubStr(Noise(1)[1], 1, Random(2, 6)), x: 10 + Random(0, 30), y: 10 + Random(0, 3) * 30, w: 70, h: 20})
-        Show(shown, 1)
-    }
-}
-Idle()
-Check("portrait next to the text", Spoken(), Joined(pages))
-
 ; --- a health bar and a counter in the corners of a big box
 Begin()
 for p in ["You should rest before the climb tonight.", "The path is steep and the rope is old."]
@@ -225,6 +210,21 @@ Check("continue after reading by hand", Spoken(), full)
 Begin()
 said := f.Prime(Rows(Window(journal, 1, 3)), false, now)
 Check("read by hand reads everything", Spoken(), Joined(Window(journal, 1, 3)))
+
+; --- a portrait next to the text, read as scraps that change all the time
+Begin()
+for p in pages {
+    loop 4 {
+        shown := []
+        for t in Wrap(p, 40)
+            shown.Push({text: t, x: 140, y: 10 + A_Index * 30, w: 260, h: 20})
+        loop Random(0, 2)                  ; one or two scraps of a few letters
+            shown.Push({text: SubStr(Noise(1)[1], 1, Random(2, 6)), x: 10 + Random(0, 30), y: 10 + Random(0, 3) * 30, w: 70, h: 20})
+        Show(shown, 1)
+    }
+}
+Idle()
+Check("portrait next to the text", Spoken(), Joined(pages))
 
 ; --- repeated OCR mistakes: nothing lost, hardly anything twice
 worst := 0, lost := 0, total := 0
